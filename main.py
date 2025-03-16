@@ -303,34 +303,11 @@ def parse_ria(url):
 
 
 def parse_mk(url):
-    def get_link_hrefs():
+    def get_link_hrefs(url_part):
         link_hrefs_main = [
-            url + '/news/',
+            url_part + '/news/',
         ]
         return link_hrefs_main
-
-    def parse_news_date(date_str):
-        news_datetime = datetime.today()
-        parts = date_str.split()
-        time_part = parts[-1].split(':')
-        try:
-            if len(parts) == 1:
-                news_datetime = news_datetime.replace(hour=int(time_part[0]), minute=int(time_part[1]), second=0, microsecond=0)
-            elif len(parts) == 2:
-                news_datetime = news_datetime - timedelta(days=1)
-                news_datetime = news_datetime.replace(hour=int(time_part[0]), minute=int(time_part[1]), second=0, microsecond=0)
-            elif len(parts) == 3:
-                month = parts[1].split(',')[0]
-                news_datetime = news_datetime.replace(month=MONTHS[month], day=int(parts[0]),
-                                                      hour=int(time_part[0]), minute=int(time_part[1]), second=0, microsecond=0)
-            elif len(parts) == 4:
-                year = parts[2].split(',')[0]
-                month = parts[1].split(',')[0]
-                news_datetime = news_datetime.replace(year=int(year), month=MONTHS[month], day=int(parts[0]),
-                                                      hour=int(time_part[0]), minute=int(time_part[1]), second=0, microsecond=0)
-        except Exception as err:
-            print(f'Date parse error: ', err)
-        return news_datetime
 
     def parse_news_links(url_link, news_links: dict):
         pages = list()
@@ -361,58 +338,6 @@ def parse_mk(url):
                     else:
                         news_links[item_topic] = list()
                     news_links[item_topic].append(news_item)
-        """
-        while True:
-            if link_iteration_done:
-                break
-
-            news_items = driver.find_elements(By.CSS_SELECTOR, 'div.list-item')
-            new_news_found = False
-            for item in news_items:
-                try:
-                    content_element = item.find_element(By.CLASS_NAME, 'list-item__content')
-                    news_link = content_element.find_element(By.CSS_SELECTOR, 'a').get_attribute('href')
-
-                    if news_link in visited_news:
-                        continue
-
-                    tag_element = item.find_element(By.CLASS_NAME, 'list-item__tags')
-                    tags_list_element = tag_element.find_elements(By.CLASS_NAME, 'list-tag')
-                    news_tags = [tag.get_attribute('text').strip() for tag in tags_list_element]
-                    if not news_tags:
-                        continue
-
-                    news_topic = driver.find_element(By.CLASS_NAME, 'tag-input__tag-text').text
-
-                    date_element = item.find_element(By.CLASS_NAME, 'list-item__info-item[data-type="date"]')
-                    news_date = parse_news_date(date_element.text)
-
-                    if news_date < date_limit:
-                        # print(f'Found {news_count} news with topic "{news_topic}"')
-                        link_iteration_done = True
-                        break
-
-                    news_item = {
-                        'link': news_link
-                    }
-
-                    if news_topic not in news_links:
-                        news_links[news_topic] = list()
-                    news_links[news_topic].append(news_item)
-
-                    visited_news.add(news_link)
-                    new_news_found = True
-
-                    news_count += 1
-                except Exception as excep:
-                    print(f'Error while processing news item:\n{excep}')
-
-            if not new_news_found:
-                break
-
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(1)
-        """
         return news_links
 
     def parse_news_article(article_url):
@@ -435,8 +360,6 @@ def parse_mk(url):
             for author in author_meta:
                 if author.find('meta', attrs={'itemprop': 'name'}):
                     authors.append(author.find('meta', attrs={'itemprop': 'name'})['content'])
-            # authors = [author.find('meta', attrs={'itemprop': 'name'})['content'] for author in author_meta if
-            #            author.find('meta', attrs={'itemprop': 'name'})]
             article_data['author'] = ', '.join(authors)
 
             publish_date_meta = soup.find('meta', attrs={'itemprop': 'datePublished'})
@@ -460,7 +383,7 @@ def parse_mk(url):
 
     news_mk_links = load_json("data/news_mk_links.json")
     news_mk_data = load_json("data/news_mk_data.json")
-    link_hrefs = get_link_hrefs()
+    link_hrefs = get_link_hrefs(url)
     # driver = setup_selenium_driver()
     progress_bar_links = tqdm(link_hrefs, desc='Processing links', unit=' link', position=0,
                               leave=True, dynamic_ncols=True)
@@ -485,20 +408,6 @@ def parse_mk(url):
                     else:
                         news_mk_data[news_topic] = list()
                     news_mk_data[news_topic].append(a_data)
-
-            # progress_bar_articles = tqdm(links[topic],
-            #                              desc=f'Processing articles with topic: "{topic}"',
-            #                              unit=' article',
-            #                              position=0,
-            #                              leave=True,
-            #                              dynamic_ncols=True)
-            # for article in progress_bar_articles:
-            #     if article['link'] not in [item['link'] for item in news_mk_links[topic]]:
-            #         news_mk_links[topic].append(article)
-            #         data_item = parse_news_article(article['link'])
-            #         if data_item:
-            #             news_mk_data[topic].append(data_item)
-
             save_json("data/news_mk_data.json", news_mk_data)
         except Exception as e:
             print(f'Error:\n{e}\nLink: {link} skipped due to an error')
