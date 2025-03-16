@@ -22,7 +22,7 @@ MONTHS = {
     "ноября": 11,
     "декабря": 12
 }
-CUTOFF_DATE = datetime.today() - timedelta(hours=18)
+CUTOFF_DATE = datetime.today() - timedelta(hours=2)
 
 
 def read_cites_file():
@@ -172,11 +172,11 @@ def parse_ria(url):
                     if news_link in visited_news:
                         continue
 
-                    tag_element = item.find_element(By.CLASS_NAME, 'list-item__tags')
-                    tags_list_element = tag_element.find_elements(By.CLASS_NAME, 'list-tag')
-                    news_tags = [tag.get_attribute('text').strip() for tag in tags_list_element]
-                    if not news_tags:
-                        continue
+                    # tag_element = item.find_element(By.CLASS_NAME, 'list-item__tags')
+                    # tags_list_element = tag_element.find_elements(By.CLASS_NAME, 'list-tag')
+                    # news_tags = [tag.get_attribute('text').strip() for tag in tags_list_element]
+                    # if not news_tags:
+                    #     continue
 
                     news_topic = driver.find_element(By.CLASS_NAME, 'tag-input__tag-text').text
 
@@ -271,7 +271,7 @@ def parse_ria(url):
             progress_bar_links.set_postfix_str(f'{link}')
             driver.get(link)
             time.sleep(0.5)
-            links, topic = parse_news_links(links, CUTOFF_DATE)
+            links, topic = parse_news_links(news_ria_links, CUTOFF_DATE)
 
             if topic not in links:
                 continue
@@ -332,29 +332,35 @@ def parse_mk(url):
             print(f'Date parse error: ', err)
         return news_datetime
 
-    def parse_news_links(url_link, news_links: dict, date_limit):
-        news_count = 0
-        news_topic = ''
-        link_iteration_done = False
-        visited_news = set()
+    def parse_news_links(url_link, news_links: dict):
         pages = list()
         current_datetime = datetime.today()
+
         while current_datetime >= CUTOFF_DATE:
             pages.append(current_datetime.strftime('%Y/%m/%d'))
             current_datetime -= timedelta(days=1)
         pages_links = [url_link + f'{page}/' for page in pages]
         for page_link in pages_links:
-            driver.get(page_link)
-            news_items_day_group = driver.find_element(By.CSS_SELECTOR, 'section.news-listing__day-group')
-            group_date = news_items_day_group.find_element(By.CLASS_NAME, 'news-listing__day-date').text.split(' ')
-            group_date[1] = MONTHS[str.lower(group_date[1])]
-            news_items = news_items_day_group.find_elements(By.CLASS_NAME, 'news-listing__item-link')
-            for item in news_items:
-                item_time = item.find_element(By.CLASS_NAME, 'news-listing__item-time').text
+            resp = requests.get(page_link)
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            # driver.get(page_link)
+
+            items = soup.find_all('a', class_='news-listing__item-link')
+            # items = driver.find_elements(By.CLASS_NAME, 'news-listing__item-link')
+            for item in items:
+                # item_time = item.find_element(By.CLASS_NAME, 'news-listing__item-time').text
+                item_time = item.find('span', class_='news-listing__item-time').text
                 if item_time != '':
-                    item_datetime = '-'.join(map(str, group_date[::-1])) + f' {item_time}'
-                    item_datetime = datetime.strptime(item_datetime, '%Y-%m-%d %H:%M')
-                    print(item_datetime)
+                    item_link = item.attrs['href']
+                    item_topic = item_link.split('/')[3]
+                    news_item = {'link': item_link}
+
+                    if item_topic in news_links:
+                        if news_item in news_links[item_topic]:
+                            continue
+                    else:
+                        news_links[item_topic] = list()
+                    news_links[item_topic].append(news_item)
         """
         while True:
             if link_iteration_done:
@@ -407,49 +413,46 @@ def parse_mk(url):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(1)
         """
-        return news_links, news_topic
+        return news_links
 
     def parse_news_article(article_url):
         try:
-            # print('Parsing article from url: ', article_url)
             resp = requests.get(article_url)
-            resp.raise_for_status()
             soup = BeautifulSoup(resp.text, 'html.parser')
+
             article_data = {
-                "title": soup.find('meta', attrs={'name': 'analytics:title'})['content'],
-                "description": soup.find('meta', attrs={'name': 'description'})['content'],
-                "topic": soup.find('meta', attrs={'name': 'analytics:rubric'})['content'],
-                "keywords": soup.find('meta', attrs={'name': 'keywords'})['content'].split(', '),
+                "title": soup.find('meta', attrs={'name': 'title'})['content'],
+                "topic": soup.find('meta', attrs={'itemprop': 'articleSection'})['content'],
+                "keywords": str.lower(soup.find('meta', attrs={'name': 'keywords'})['content']).split(', '),
                 "author": None,
                 "publish_date": None,
                 "modified_date": None,
                 "content": ''
             }
 
-            author_meta = soup.find('meta', attrs={'name': 'analytics:author'})
-            if author_meta and author_meta.has_attr('content') and author_meta['content'] != '':
-                article_data["author"] = author_meta['content']
-            else:
-                author_meta = soup.find('meta', attrs={'property': 'article:author'})
-                if author_meta and author_meta.has_attr('content'):
-                    article_data["author"] = author_meta['content']
+            author_meta = soup.find_all('li', class_='article__authors-data-item')
+            authors = list()
+            for author in author_meta:
+                if author.find('meta', attrs={'itemprop': 'name'}):
+                    authors.append(author.find('meta', attrs={'itemprop': 'name'})['content'])
+            # authors = [author.find('meta', attrs={'itemprop': 'name'})['content'] for author in author_meta if
+            #            author.find('meta', attrs={'itemprop': 'name'})]
+            article_data['author'] = ', '.join(authors)
 
-            publish_date_meta = soup.find('meta', attrs={'property': 'article:published_time'})
-            if publish_date_meta and publish_date_meta.has_attr('content'):
-                article_data["publish_date"] = datetime.strptime(publish_date_meta['content'],
-                                                                 "%Y%m%dT%H%M").strftime("%Y-%m-%d %H:%M")
+            publish_date_meta = soup.find('meta', attrs={'itemprop': 'datePublished'})
+            article_data["publish_date"] = datetime.strptime(publish_date_meta['content'],
+                                                             "%Y-%m-%dT%H:%M:%S%z").strftime("%Y-%m-%d %H:%M")
 
-            modified_date_meta = soup.find('meta', attrs={'property': 'article:modified_time'})
-            if modified_date_meta and modified_date_meta.has_attr('content'):
-                article_data["modified_date"] = datetime.strptime(modified_date_meta['content'],
-                                                                  "%Y%m%dT%H%M").strftime("%Y-%m-%d %H:%M")
+            modified_date_meta = soup.find('meta', attrs={'itemprop': 'dateModified'})
+            modified_data = datetime.strptime(modified_date_meta['content'],
+                                              "%Y-%m-%dT%H:%M:%S%z").strftime("%Y-%m-%d %H:%M")
+            if modified_data != article_data["publish_date"]:
+                article_data["modified_date"] = modified_data
 
-            contents = soup.find_all('div', class_='article__text')
+            contents = soup.find_all('div', class_='article__body')
             article_content = [content.text.strip() for content in contents]
             for string in article_content:
                 article_data['content'] += string
-
-            # print('Done')
 
             return article_data
         except Exception as err:
@@ -457,55 +460,57 @@ def parse_mk(url):
 
     news_mk_links = load_json("data/news_mk_links.json")
     news_mk_data = load_json("data/news_mk_data.json")
-
-    links = dict()
-    data = dict()
-
     link_hrefs = get_link_hrefs()
-    driver = setup_selenium_driver()
+    # driver = setup_selenium_driver()
     progress_bar_links = tqdm(link_hrefs, desc='Processing links', unit=' link', position=0,
                               leave=True, dynamic_ncols=True)
     for link in progress_bar_links:
         try:
             progress_bar_links.set_postfix_str(f'{link}')
-            driver.get(link)
             time.sleep(0.5)
-            links, topic = parse_news_links(link, links, CUTOFF_DATE)
-
-            if topic not in links:
-                continue
-
-            if topic not in news_mk_links:
-                news_mk_links[topic] = []
-            if topic not in news_mk_data:
-                news_mk_data[topic] = []
-
-            progress_bar_articles = tqdm(links[topic],
-                                         desc=f'Processing articles with topic: "{topic}"',
-                                         unit=' article',
-                                         position=0,
-                                         leave=True,
-                                         dynamic_ncols=True)
-            for article in progress_bar_articles:
-                if article['link'] not in [item['link'] for item in news_mk_links[topic]]:
-                    news_mk_links[topic].append(article)
-                    data_item = parse_news_article(article['link'])
-                    if data_item:
-                        news_mk_data[topic].append(data_item)
-
+            news_mk_links = parse_news_links(link, news_mk_links)
             save_json("data/news_mk_links.json", news_mk_links)
+            for news_topic in news_mk_links:
+                progress_bar_articles = tqdm(news_mk_links[news_topic],
+                                             desc=f'Processing articles with topic: "{news_topic}"',
+                                             unit=' article',
+                                             position=0,
+                                             leave=True,
+                                             dynamic_ncols=True)
+                for article in progress_bar_articles:
+                    a_data = parse_news_article(article['link'])
+                    if news_topic in news_mk_data:
+                        if a_data in news_mk_data[news_topic]:
+                            continue
+                    else:
+                        news_mk_data[news_topic] = list()
+                    news_mk_data[news_topic].append(a_data)
+
+            # progress_bar_articles = tqdm(links[topic],
+            #                              desc=f'Processing articles with topic: "{topic}"',
+            #                              unit=' article',
+            #                              position=0,
+            #                              leave=True,
+            #                              dynamic_ncols=True)
+            # for article in progress_bar_articles:
+            #     if article['link'] not in [item['link'] for item in news_mk_links[topic]]:
+            #         news_mk_links[topic].append(article)
+            #         data_item = parse_news_article(article['link'])
+            #         if data_item:
+            #             news_mk_data[topic].append(data_item)
+
             save_json("data/news_mk_data.json", news_mk_data)
         except Exception as e:
             print(f'Error:\n{e}\nLink: {link} skipped due to an error')
-    driver.quit()
+    # driver.quit()
 
-    return links, data
+    return news_mk_links, news_mk_data
 
 
 def main():
     cites = read_cites_file()
-    print('Parse news from:\t', cites[0])
-    parse_news(cites[0])
+    print('Parse news from:\t', cites[1])
+    parse_news(cites[1])
     pass
 
 
